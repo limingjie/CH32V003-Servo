@@ -1,6 +1,6 @@
 # CH32V003 Servo
 
-Servo driver by CH32V003, use systick to create a fixed period PWM signal and stable pulse width, the logic in the main loop changes the pulse width.
+The servo driver by CH32V003, uses systick to create a fixed period PWM signal and stable pulse width, the logic in the main loop changes the pulse width.
 
 ![CH32V003 Servo](images/CH32V003_Servo.webp)
 
