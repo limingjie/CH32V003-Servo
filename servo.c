@@ -1,5 +1,12 @@
 /*
  * CH32V003J4M6 (SOP-8) Servo
+ *
+ * Reference:
+ *  - https://github.com/cnlohr/ch32v003fun/blob/master/examples/systick_irq/systick_irq.c
+ *
+ * Aug 2023 by Li Mingjie
+ *  - Email:  limingjie@outlook.com
+ *  - GitHub: https://github.com/limingjie/
  */
 
 #include "ch32v003fun.h"
@@ -14,12 +21,12 @@
 #define SYSTICK_CTLR_SWIE  (1 << 31)
 
 // Servo positions
-#define SERVO_MIN_US        1000
-#define SERVO_MID_US        1500
-#define SERVO_MAX_US        2000
-#define SERVO_FULL_CYCLE_US 20000
+#define SERVO_MIN_PULSE_WIDTH_US     1000   //   0 degrees or min depends on servo
+#define SERVO_NEUTRAL_PULSE_WIDTH_US 1500   //  90 degrees
+#define SERVO_MAX_PULSE_WIDTH_US     2000   // 180 degrees or max depends on servo
+#define SERVO_PULSE_PERIOD_US        20000  // 50Hz
 
-uint32_t high_us = SERVO_MIN_US;
+uint32_t servo_pulse_width = SERVO_NEUTRAL_PULSE_WIDTH_US;  // Initial position = 90 degrees
 
 // Pins
 uint16_t servo_pin  = GPIOv_from_PORT_PIN(GPIO_port_C, 1);
@@ -29,7 +36,7 @@ void systick_init(void)
 {
     SysTick->CTLR = 0;
     NVIC_EnableIRQ(SysTicK_IRQn);
-    SysTick->CMP  = (FUNCONF_SYSTEM_CORE_CLOCK / 1000 * 20) - 1;
+    SysTick->CMP  = (FUNCONF_SYSTEM_CORE_CLOCK / 1000 * 20) - 1;  // 20 ms
     SysTick->CNT  = 0;
     SysTick->CTLR = SYSTICK_CTLR_STE | SYSTICK_CTLR_STIE | SYSTICK_CTLR_STCLK;
 }
@@ -37,11 +44,13 @@ void systick_init(void)
 void SysTick_Handler(void) __attribute__((interrupt));
 void SysTick_Handler(void)
 {
-    SysTick->CMP += (FUNCONF_SYSTEM_CORE_CLOCK / 1000 * 20);
+    // SysTick maintains accurate 20ms period
+    SysTick->CMP += (FUNCONF_SYSTEM_CORE_CLOCK / 1000 * 20);  // 20 ms
     SysTick->SR = 0;
 
+    // Send the pulse
     GPIO_digitalWrite_high(servo_pin);
-    Delay_Us(high_us);
+    Delay_Us(servo_pulse_width);
     GPIO_digitalWrite_low(servo_pin);
 }
 
@@ -57,68 +66,69 @@ int main()
 
     systick_init();
 
-    int16_t  step      = 50;
-    uint32_t count     = 0;
-    uint32_t max_count = 100;
-    int8_t   mode      = -1;
+    int8_t   mode        = -1;
+    int16_t  step_us     = 50;
+    uint32_t cycle       = 0;
+    uint32_t servo_cycle = 100;
     while (1)
     {
         if (GPIO_digitalRead(button_pin))
         {
-            Delay_Ms(300);  // Debounce
+            Delay_Ms(300);  // Naive debounce :)
             mode++;
-            mode %= 8;
+            mode &= 0x07;
 
             switch (mode)
             {
-                case 0:
-                    high_us = SERVO_MAX_US;
+                case 0:  // min
+                    servo_pulse_width = SERVO_MAX_PULSE_WIDTH_US;
                     break;
-                case 1:
-                    high_us = SERVO_MID_US;
+                case 1:  // neutral
+                    servo_pulse_width = SERVO_NEUTRAL_PULSE_WIDTH_US;
                     break;
-                case 2:
-                    high_us = SERVO_MIN_US;
+                case 2:  // max
+                    servo_pulse_width = SERVO_MIN_PULSE_WIDTH_US;
                     break;
-                case 3:
-                    step      = 1000;
-                    max_count = 50;
+                case 3:  // min <-> max
+                    step_us     = 1000;
+                    servo_cycle = 50;
                     break;
-                case 4:
-                    step      = 500;
-                    max_count = 50;
+                case 4:  // min <-> neutral <-> max
+                    step_us     = 500;
+                    servo_cycle = 50;
                     break;
-                case 5:
-                    step      = 200;
-                    max_count = 30;
+                case 5:  // min <-> 5 steps <-> max
+                    step_us     = 200;
+                    servo_cycle = 30;
                     break;
-                case 6:
-                    step      = 100;
-                    max_count = 10;
+                case 6:  // min <-> 10 steps <-> max
+                    step_us     = 100;
+                    servo_cycle = 10;
                     break;
-                case 7:
-                    step      = 50;
-                    max_count = 5;
+                case 7:  // min <-> 20 steps <-> max
+                    step_us     = 50;
+                    servo_cycle = 5;
                     break;
             }
         }
 
         if (mode >= 3)
         {
-            if (count++ >= max_count)
+            // Change servo position every servo_cycle (servo_cycle x 10ms)
+            if (cycle++ >= servo_cycle)
             {
-                count = 0;
+                cycle = 0;
 
-                high_us += step;
-                if (high_us >= SERVO_MAX_US)
+                servo_pulse_width += step_us;
+                if (servo_pulse_width >= SERVO_MAX_PULSE_WIDTH_US)
                 {
-                    high_us = SERVO_MAX_US;
-                    step    = -step;
+                    servo_pulse_width = SERVO_MAX_PULSE_WIDTH_US;
+                    step_us           = -step_us;
                 }
-                else if (high_us <= SERVO_MIN_US)
+                else if (servo_pulse_width <= SERVO_MIN_PULSE_WIDTH_US)
                 {
-                    high_us = SERVO_MIN_US;
-                    step    = -step;
+                    servo_pulse_width = SERVO_MIN_PULSE_WIDTH_US;
+                    step_us           = -step_us;
                 }
             }
         }
